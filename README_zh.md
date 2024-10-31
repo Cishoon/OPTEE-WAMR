@@ -1,4 +1,4 @@
-[中文版本](#README_zh.md) | [English Version](#README.md)
+[中文版本](README_zh.md) | [English Version](README.md)
 
 # OPTEE WAMR
 
