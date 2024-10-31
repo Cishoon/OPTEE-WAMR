@@ -27,6 +27,7 @@ optee_wamr <heap_size> <aot_path>
 ```
 
 - The `AoT` file must be compiled with the `cba4c782` version of `wasm-micro-runtime`'s `wamrc`, specifying the `--target=aarch64` option. See [Build wamrc AOT compiler](https://github.com/bytecodealliance/wasm-micro-runtime/blob/main/wamr-compiler/README.md) for details on compiling `wamrc`.
+- The `wasm` file used to compile the `AoT` file needs to be compiled by `wasi-sdk`.
 - The `heap_size` value may vary depending on the environment; in my test environment, the valid range is `[408340, 12573936]`. Generally, setting it to `1000000` provides stable performance.
 
 A sample AoT file `hello_aarch64.aot` is provided in the `./test` directory for quick configuration verification. Run the command `optee_wamr 1000000 ./test/hello_aarch64.aot` to output `Hello WebAssembly!`.
