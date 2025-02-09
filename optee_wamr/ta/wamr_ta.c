@@ -8,6 +8,7 @@
 #include <wasm.h>
 
 #include "logging.h"
+#include "wasi.h"
 
 static uint32_t heap_size;
 
@@ -84,8 +85,8 @@ static TEE_Result TA_RunWasm(uint8_t *wasm_bytecode, uint32_t wasm_bytecode_size
         {
             .heap_buf = global_heap_buf,
             .heap_size = heap_size,
-            // .native_symbols = wasi_ra_native_symbols,
-            // .native_symbols_size = wasi_ra_native_symbols_size,
+            .native_symbols = wasi_native_symbols,
+            .native_symbols_size = wasi_native_symbols_size,
             .wasm_bytecode = trusted_wasm_bytecode,
             .wasm_bytecode_size = wasm_bytecode_size};
 

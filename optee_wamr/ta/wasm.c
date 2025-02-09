@@ -85,9 +85,9 @@ TEE_Result TA_InitializeWamrRuntime(wamr_context *context, int argc, char **argv
     init_args.mem_alloc_option.pool.heap_size = context->heap_size;
 
     // Native symbols need below registration phase
-    // init_args.n_native_symbols = context->native_symbols_size / sizeof(NativeSymbol);
-    // init_args.native_module_name = "env";
-    // init_args.native_symbols = context->native_symbols;
+    init_args.n_native_symbols = context->native_symbols_size / sizeof(NativeSymbol);
+    init_args.native_module_name = "env";
+    init_args.native_symbols = context->native_symbols;
 
     if (!wasm_runtime_full_init(&init_args))
     {
