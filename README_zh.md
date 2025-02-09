@@ -30,6 +30,40 @@ optee_wamr <heap_size> <aot_path>
 - 而用于编译 `AoT` 文件的 `wasm` 文件需要由 `wasi-sdk` 编译得到。
 - `heap_size` 取值可能因环境而异，在我的测试环境下可用范围是 `[408340, 12573936]`，建议一般设置为 `1000000` 以保证稳定性。
 
-在 `./test` 目录中提供了一个示例 AoT 文件 `hello_aarch64.aot`，用于快速验证配置是否成功。运行命令 `optee_wamr 1000000 ./test/hello_aarch64.aot` 将会输出 `Hello WebAssembly!`。
+### 外部函数导入
 
-更多技术细节和移植过程见[毕设 05](https://cishoon.github.io/graduation-project/05/) 和 [毕设 06](https://cishoon.github.io/graduation-project/06/)。
+在 `optee_wamr/ta/wasi.c` 和 `optee_wamr/ta/wasi.h` 文件中，添加需要导入的外部函数。具体参考：[Exporting Native API Steps](https://wamr.gitbook.io/document/wamr-in-practice/features/export_native_api#exporting-native-api-steps)
+
+
+## 测试代码说明
+
+### Hello World
+
+编译 `hello.c` 文件得到 `hello.wasm` 文件：
+```bash
+/opt/wasi-sdk/bin/clang -O3 -o hello.wasm hello.c
+```
+
+然后使用 `wamrc` 编译得到 `hello.aot` 文件：
+```bash
+wamrc --target=aarch64 --disable-simd hello.wasm -o hello.aot
+```
+
+在 OPTEE 中运行命令 `optee_wamr 1000000 ./hello.aot` 将会输出 `Hello WebAssembly!`。
+
+### 外部函数测试(rust)
+
+编译 `external_function.rs` 文件得到 `external_function.wasm` 文件：
+```bash
+rustc -C link-self-contained=no \
+    -C link-args=--no-entry \
+    -C link-args=-zstack-size=32768 \
+    --target wasm32-wasip1 external_function.rs
+```
+
+然后使用 `wamrc` 编译得到 `external_function.aot` 文件：
+```bash
+wamrc --target=aarch64 --disable-simd external_function.wasm -o external_function.aot
+```
+
+在 OPTEE 中运行命令 `optee_wamr 1000000 ./external_function.aot` 将会在 Secure World 中输出 `Hello Rust World!`。

@@ -8,7 +8,7 @@ This project is a trusted application based on [WaTZ](https://github.com/JamesMe
 
 This project is based on specific versions of `unine-watz`, `wasm-micro-runtime`, and `optee_os`, ensuring compatibility across different modules within the latest OPTEE environment.
 
-- The project is based on version `a436628` of `unine-watz` (Apache License 2.0) and has removed the original project’s remote authentication components.
+- The project is based on version `a436628` of `unine-watz` (Apache License 2.0) and has removed the original project's remote authentication components.
 - The project references version `cba4c782` of `wasm-micro-runtime` (Apache License 2.0) for compiling usable `AoT` files.
 - The project is based on version `19662e4` of `optee_os`, with the addition of the `mprotect` system call.
 
@@ -30,6 +30,41 @@ optee_wamr <heap_size> <aot_path>
 - The `wasm` file used to compile the `AoT` file needs to be compiled by `wasi-sdk`.
 - The `heap_size` value may vary depending on the environment; in my test environment, the valid range is `[408340, 12573936]`. Generally, setting it to `1000000` provides stable performance.
 
-A sample AoT file `hello_aarch64.aot` is provided in the `./test` directory for quick configuration verification. Run the command `optee_wamr 1000000 ./test/hello_aarch64.aot` to output `Hello WebAssembly!`.
+### Importing External Functions
 
-For more technical details and information on the porting process, see [Thesis Project 05](https://cishoon.github.io/graduation-project/05/) and [Thesis Project 06](https://cishoon.github.io/graduation-project/06/).
+Add the external functions you need to import in the `optee_wamr/ta/wasi.c` and `optee_wamr/ta/wasi.h` files. For details, refer to: [Exporting Native API Steps](https://wamr.gitbook.io/document/wamr-in-practice/features/export_native_api#exporting-native-api-steps)
+
+## Test Code Description
+
+### Hello World
+
+Compile the `hello.c` file to get the `hello.wasm` file:
+```bash
+/opt/wasi-sdk/bin/clang -O3 -o hello.wasm hello.c
+```
+
+Then use `wamrc` to compile the `hello.aot` file:
+```bash
+wamrc --target=aarch64 --disable-simd hello.wasm -o hello.aot
+```
+
+Run the command `optee_wamr 1000000 ./hello.aot` in OPTEE to output `Hello WebAssembly!`.
+
+### External Function Test (Rust)
+
+Compile the `external_function.rs` file to get the `external_function.wasm` file:
+```bash
+rustc -C link-self-contained=no \
+    -C link-args=--no-entry \
+    -C link-args=-zstack-size=32768 \
+    --target wasm32-wasip1 external_function.rs
+```
+
+Then use `wamrc` to compile the `external_function.aot` file:
+```bash
+wamrc --target=aarch64 --disable-simd external_function.wasm -o external_function.aot
+```
+
+Run the command `optee_wamr 1000000 ./external_function.aot` in OPTEE to output `Hello Rust World!` in the Secure World.
+
+
