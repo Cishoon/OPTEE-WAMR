@@ -1,0 +1,14 @@
+[package]
+name = "wasm-rust"
+version = "0.1.0"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wee_alloc = "0.4.5"
+
+[profile.release]
+opt-level = "s"
+lto = true
+panic = "abort"

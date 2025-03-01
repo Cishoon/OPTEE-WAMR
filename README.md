@@ -77,4 +77,12 @@ wamrc --target=aarch64 --disable-simd external_function.wasm -o external_functio
 
 Run the command `optee_wamr 1000000 ./external_function.aot` in OPTEE to output `Hello Rust World!` in the Secure World.
 
+### Rust & Dynamic Memory Allocation
 
+Compile the `wasm-rust` project to get the `wasm-rust.aot` file:
+```bash
+cd test/wasm-rust
+./build.sh
+```
+
+Import the external library `wee_alloc` as the memory allocator, so that dynamic memory allocation can be used in the Rust-compiled wasm.

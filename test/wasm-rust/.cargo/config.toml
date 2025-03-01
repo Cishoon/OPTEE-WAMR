@@ -1,0 +1,8 @@
+[build]
+target = "wasm32v1-none"
+
+[target.wasm32v1-none]
+rustflags = [
+    "-C", "link-arg=--no-entry",
+    "-C", "link-arg=--export=__main_argc_argv",
+] 

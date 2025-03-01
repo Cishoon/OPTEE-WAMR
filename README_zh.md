@@ -77,3 +77,15 @@ wamrc --target=aarch64 --disable-simd external_function.wasm -o external_functio
 ```
 
 在 OPTEE 中运行命令 `optee_wamr 1000000 ./external_function.aot` 将会在 Secure World 中输出 `Hello Rust World!`。
+
+### Rust & 动态内存分配
+
+编译 `wasm-rust` 项目得到 `wasm-rust.aot` 文件：
+
+```bash
+cd test/wasm-rust
+./build.sh
+```
+
+引入外部库 `wee_alloc` 作为内存分配器，可以在 Rust 编译的 wasm 中使用动态内存分配。
+
