@@ -6,6 +6,7 @@
 #include "platform_api_vmcore.h"
 #include "platform_api_extension.h"
 
+/* clang-format off */
 #define bh_assert(v) do {                                   \
     if (!(v)) {                                             \
         int _count = 1;                                     \
@@ -15,7 +16,8 @@
         os_printf("%d\n", _count / (_count - 1));           \
         while (1);                                          \
     }                                                       \
-  } while (0)
+} while (0)
+/* clang-format on */
 
 struct os_thread_data;
 typedef struct os_thread_wait_node {
@@ -56,7 +58,8 @@ static os_thread_data supervisor_thread_data;
 /* Thread name index */
 static int thread_name_index;
 
-static void thread_data_list_add(os_thread_data *thread_data)
+static void
+thread_data_list_add(os_thread_data *thread_data)
 {
     xSemaphoreTake(thread_data_lock, portMAX_DELAY);
     if (!thread_data_list)
@@ -79,7 +82,8 @@ static void thread_data_list_add(os_thread_data *thread_data)
     xSemaphoreGive(thread_data_lock);
 }
 
-static void thread_data_list_remove(os_thread_data *thread_data)
+static void
+thread_data_list_remove(os_thread_data *thread_data)
 {
     xSemaphoreTake(thread_data_lock, portMAX_DELAY);
     if (thread_data_list) {
@@ -200,19 +204,20 @@ os_thread_wrapper(void *arg)
     thread_data_list_add(thread_data);
 
     thread_data->start_routine(thread_data->arg);
-    os_thread_cleanup();
-    vTaskDelete(NULL);
+    os_thread_exit(NULL);
 }
 
-int os_thread_create(korp_tid *p_tid, thread_start_routine_t start, void *arg,
-                     unsigned int stack_size)
+int
+os_thread_create(korp_tid *p_tid, thread_start_routine_t start, void *arg,
+                 unsigned int stack_size)
 {
     return os_thread_create_with_prio(p_tid, start, arg, stack_size,
                                       BH_THREAD_DEFAULT_PRIORITY);
 }
 
-int os_thread_create_with_prio(korp_tid *p_tid, thread_start_routine_t start,
-                               void *arg, unsigned int stack_size, int prio)
+int
+os_thread_create_with_prio(korp_tid *p_tid, thread_start_routine_t start,
+                           void *arg, unsigned int stack_size, int prio)
 {
     os_thread_data *thread_data;
     char thread_name[32];
@@ -235,13 +240,13 @@ int os_thread_create_with_prio(korp_tid *p_tid, thread_start_routine_t start,
     if (!(thread_data->wait_list_lock = xSemaphoreCreateMutex()))
         goto fail2;
 
-    snprintf(thread_name, sizeof(thread_name), "%s%d",
-            "wasm-thread-", ++thread_name_index);
+    snprintf(thread_name, sizeof(thread_name), "%s%d", "wasm-thread-",
+             ++thread_name_index);
 
     /* Create the thread */
-    if (pdPASS != xTaskCreate(os_thread_wrapper, thread_name,
-                              stack_size / 4, thread_data,
-                              prio, &thread_data->handle))
+    if (pdPASS
+        != xTaskCreate(os_thread_wrapper, thread_name, stack_size / 4,
+                       thread_data, prio, &thread_data->handle))
         goto fail3;
 
     thread_data_list_add(thread_data);
@@ -257,12 +262,14 @@ fail1:
     return BHT_ERROR;
 }
 
-korp_tid os_self_thread()
+korp_tid
+os_self_thread()
 {
     return xTaskGetCurrentTaskHandle();
 }
 
-int os_thread_join(korp_tid thread, void **value_ptr)
+int
+os_thread_join(korp_tid thread, void **value_ptr)
 {
     os_thread_data *thread_data, *curr_thread_data;
     TaskHandle_t handle = thread;
@@ -293,7 +300,24 @@ int os_thread_join(korp_tid thread, void **value_ptr)
     return BHT_OK;
 }
 
-int os_mutex_init(korp_mutex *mutex)
+int
+os_thread_detach(korp_tid thread)
+{
+    /* Do nothing */
+    (void)thread;
+    return BHT_OK;
+}
+
+void
+os_thread_exit(void *retval)
+{
+    (void)retval;
+    os_thread_cleanup();
+    vTaskDelete(NULL);
+}
+
+int
+os_mutex_init(korp_mutex *mutex)
 {
     SemaphoreHandle_t semaphore;
 
@@ -304,7 +328,8 @@ int os_mutex_init(korp_mutex *mutex)
     return BHT_OK;
 }
 
-int os_recursive_mutex_init(korp_mutex *mutex)
+int
+os_recursive_mutex_init(korp_mutex *mutex)
 {
     SemaphoreHandle_t semaphore;
 
@@ -315,13 +340,15 @@ int os_recursive_mutex_init(korp_mutex *mutex)
     return BHT_OK;
 }
 
-int os_mutex_destroy(korp_mutex *mutex)
+int
+os_mutex_destroy(korp_mutex *mutex)
 {
     vSemaphoreDelete(mutex->sem);
     return BHT_OK;
 }
 
-int os_mutex_lock(korp_mutex *mutex)
+int
+os_mutex_lock(korp_mutex *mutex)
 {
     int ret = -1;
 
@@ -332,7 +359,8 @@ int os_mutex_lock(korp_mutex *mutex)
     return ret == pdPASS ? BHT_OK : BHT_ERROR;
 }
 
-int os_mutex_unlock(korp_mutex *mutex)
+int
+os_mutex_unlock(korp_mutex *mutex)
 {
     int ret = -1;
 
@@ -343,7 +371,8 @@ int os_mutex_unlock(korp_mutex *mutex)
     return ret == pdPASS ? BHT_OK : BHT_ERROR;
 }
 
-int os_cond_init(korp_cond *cond)
+int
+os_cond_init(korp_cond *cond)
 {
     if (!(cond->wait_list_lock = xSemaphoreCreateMutex()))
         return BHT_ERROR;
@@ -352,15 +381,15 @@ int os_cond_init(korp_cond *cond)
     return BHT_OK;
 }
 
-int os_cond_destroy(korp_cond *cond)
+int
+os_cond_destroy(korp_cond *cond)
 {
     vSemaphoreDelete(cond->wait_list_lock);
     return BHT_OK;
 }
 
 static int
-os_cond_wait_internal(korp_cond *cond, korp_mutex *mutex,
-                      bool timed, int mills)
+os_cond_wait_internal(korp_cond *cond, korp_mutex *mutex, bool timed, int mills)
 {
     os_thread_wait_node *node = &thread_data_current()->wait_node;
 
@@ -399,12 +428,14 @@ os_cond_wait_internal(korp_cond *cond, korp_mutex *mutex,
     return BHT_OK;
 }
 
-int os_cond_wait(korp_cond *cond, korp_mutex *mutex)
+int
+os_cond_wait(korp_cond *cond, korp_mutex *mutex)
 {
     return os_cond_wait_internal(cond, mutex, false, 0);
 }
 
-int os_cond_reltimedwait(korp_cond *cond, korp_mutex *mutex, uint64 useconds)
+int
+os_cond_reltimedwait(korp_cond *cond, korp_mutex *mutex, uint64 useconds)
 {
     if (useconds == BHT_WAIT_FOREVER) {
         return os_cond_wait_internal(cond, mutex, false, 0);
@@ -425,7 +456,8 @@ int os_cond_reltimedwait(korp_cond *cond, korp_mutex *mutex, uint64 useconds)
     }
 }
 
-int os_cond_signal(korp_cond *cond)
+int
+os_cond_signal(korp_cond *cond)
 {
     /* Signal the head wait node of wait list */
     xSemaphoreTake(cond->wait_list_lock, portMAX_DELAY);
@@ -436,3 +468,32 @@ int os_cond_signal(korp_cond *cond)
     return BHT_OK;
 }
 
+int
+os_cond_broadcast(korp_cond *cond)
+{
+    /* Signal all of the wait node of wait list */
+    xSemaphoreTake(cond->wait_list_lock, portMAX_DELAY);
+    if (cond->thread_wait_list) {
+        os_thread_wait_node *p = cond->thread_wait_list;
+        while (p) {
+            xSemaphoreGive(p->sem);
+            p = p->next;
+        }
+    }
+    xSemaphoreGive(cond->wait_list_lock);
+
+    return BHT_OK;
+}
+
+uint8 *
+os_thread_get_stack_boundary()
+{
+    /* TODO: get freertos stack boundary */
+    return NULL;
+}
+
+void
+os_thread_jit_write_protect_np(bool enabled)
+{
+    (void)enabled;
+}

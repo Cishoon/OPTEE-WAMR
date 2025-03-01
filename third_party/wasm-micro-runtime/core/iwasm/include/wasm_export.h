@@ -23,6 +23,8 @@
 #else
 #define WASM_RUNTIME_API_EXTERN __declspec(dllimport)
 #endif
+#elif defined(__GNUC__) || defined(__clang__)
+#define WASM_RUNTIME_API_EXTERN __attribute__((visibility("default")))
 #else
 #define WASM_RUNTIME_API_EXTERN
 #endif
@@ -2299,6 +2301,12 @@ wasm_runtime_shared_heap_malloc(wasm_module_inst_t module_inst, uint64_t size,
  */
 WASM_RUNTIME_API_EXTERN void
 wasm_runtime_shared_heap_free(wasm_module_inst_t module_inst, uint64_t ptr);
+
+/**
+ * Set the buffer that contains the stdout of the run WASM app.
+ */
+WASM_RUNTIME_API_EXTERN void
+vedliot_set_output_buffer(void *buffer, uint64_t buffer_size);
 
 #ifdef __cplusplus
 }

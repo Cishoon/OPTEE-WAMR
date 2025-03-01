@@ -13,11 +13,10 @@ cwd     = GetCurrentDir()
 
 src = Glob('*.c')
 
-if rtconfig.ARCH == 'arm':
-    if re.match('^cortex-m.*', rtconfig.CPU):
-        src += ['arch/invokeNative_thumb.s']
-    elif re.match('^cortex-a.*', rtconfig.CPU):
-        src += ['arch/invokeNative_arm.s']
+if rtconfig.ARCH == 'arm' and re.match('^cortex-m.*', rtconfig.CPU):
+    src += ['arch/invokeNative_thumb.s']
+else:
+    src.append(f"arch/invokeNative_{rtconfig.ARCH}.s")
 
 CPPPATH = [cwd, cwd + '/../include']
 

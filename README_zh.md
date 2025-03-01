@@ -4,21 +4,32 @@
 
 本项目是一个基于 [WaTZ](https://github.com/JamesMenetrey/unine-watz/tree/main?tab=readme-ov-file) 移植到最新的 OPTEE 中的可信应用程序，支持在 TEE 中运行 AoT 格式的 wasm 程序。
 
+## 更新日志
+- **2025-3-1**: 更新至最新版 `wasm-micro-runtime`，支持多内存提案等新特性。
+
 ## 项目来源
 
 本项目基于特定版本的 `unine-watz`、`wasm-micro-runtime` 和 `optee_os`，确保不同模块在最新的 OPTEE 环境中兼容。
 
 * 本项目基于 `unine-watz` 的 `a436628` 版本（Apache License 2.0），删除了原项目中远程认证的部分。
-* 本项目引用了 `wasm-micro-runtime` 的 `cba4c782` 版本（Apache License 2.0），用于编译得到可用的 `AoT` 文件。
+* 本项目引用了最新版本的 `wasm-micro-runtime`（Apache License 2.0），支持更多 WebAssembly 特性。
 * 本项目基于 `optee_os` 的 `19662e4` 版本，增加了 `mprotect` 系统调用。
 
-项目中的 `./optee_wamr/build/libvmlib.a` 由 `unine-watz` 编译得到。
+## vm 库编译
+
+```bash
+cd third_party/wasm-micro-runtime/product-mini/platforms/linux-trustzone
+mkdir -p build 
+cd build
+cmake ..
+make
+```
 
 ## 使用方法
 
 1. 用 `./third_party/optee_os` 覆盖原项目中的 `optee_os`。
 2. 将 `./optee_wamr` 文件夹移入 `optee_examples` 中。
-3. 重新编译并运行。
+3. 重新编译 OP-TEE 即可。
 
 进入 Normal World 后，使用以下命令运行 wasm 程序：
 
@@ -26,9 +37,8 @@
 optee_wamr <heap_size> <aot_path>
 ```
 
-- 使用的 `AoT` 文件必须由 `cba4c782` 版本的 `wasm-micro-runtime` 的 `wamrc` 编译得到，并指定 `--target=aarch64`。编译  `wamrc` 的方式见：[Build wamrc AOT compiler](https://github.com/bytecodealliance/wasm-micro-runtime/blob/main/wamr-compiler/README.md)
-- 而用于编译 `AoT` 文件的 `wasm` 文件需要由 `wasi-sdk` 编译得到。
-- `heap_size` 取值可能因环境而异，在我的测试环境下可用范围是 `[408340, 12573936]`，建议一般设置为 `1000000` 以保证稳定性。
+- 使用的 `AoT` 文件由 `third_party/wasm-micro-runtime` 的 `wamrc` 编译得到，并指定 `--target=aarch64`。编译  `wamrc` 的方式见：[Build wamrc AOT compiler](https://github.com/bytecodealliance/wasm-micro-runtime/blob/main/wamr-compiler/README.md)
+- `heap_size` 为分配给 wasm 程序的堆空间大小，单位为字节。至少要比 aot 文件大。
 
 ### 外部函数导入
 
@@ -58,7 +68,7 @@ wamrc --target=aarch64 --disable-simd hello.wasm -o hello.aot
 rustc -C link-self-contained=no \
     -C link-args=--no-entry \
     -C link-args=-zstack-size=32768 \
-    --target wasm32-wasip1 external_function.rs
+    --target wasm32v1-none external_function.rs
 ```
 
 然后使用 `wamrc` 编译得到 `external_function.aot` 文件：

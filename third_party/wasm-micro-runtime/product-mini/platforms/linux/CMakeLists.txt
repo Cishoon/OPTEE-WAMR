@@ -108,8 +108,8 @@ if (NOT DEFINED WAMR_BUILD_SIMD)
 endif ()
 
 if (NOT DEFINED WAMR_BUILD_REF_TYPES)
-  # Disable reference types by default
-  set (WAMR_BUILD_REF_TYPES 0)
+  # Enable reference types by default
+  set (WAMR_BUILD_REF_TYPES 1)
 endif ()
 
 if (NOT DEFINED WAMR_BUILD_DEBUG_INTERP)
@@ -142,6 +142,7 @@ include (${WAMR_ROOT_DIR}/build-scripts/runtime_lib.cmake)
 check_pie_supported()
 add_library(vmlib ${WAMR_RUNTIME_LIB_SOURCE})
 set_target_properties (vmlib PROPERTIES POSITION_INDEPENDENT_CODE ON)
+set_version_info (vmlib)
 
 set (CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,--gc-sections")
 
@@ -170,6 +171,8 @@ include (${SHARED_DIR}/utils/uncommon/shared_uncommon.cmake)
 
 add_executable (iwasm main.c ${UNCOMMON_SHARED_SOURCE})
 
+set_version_info (iwasm)
+
 set_target_properties (iwasm PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 target_link_libraries(iwasm
@@ -185,8 +188,16 @@ install (TARGETS iwasm DESTINATION bin)
 
 add_library (libiwasm SHARED ${WAMR_RUNTIME_LIB_SOURCE})
 
+set_version_info (libiwasm)
+
 install (TARGETS libiwasm DESTINATION lib)
 
 set_target_properties (libiwasm PROPERTIES OUTPUT_NAME iwasm)
 
 target_link_libraries (libiwasm ${LLVM_AVAILABLE_LIBS} ${UV_A_LIBS} -lm -ldl -lpthread)
+
+# 为所有目标添加预处理器宏
+add_definitions(-DWASM_ENABLE_MULTI_MEMORY)
+
+# 或者为特定目标添加预处理器宏
+target_compile_definitions(iwasm PRIVATE WASM_ENABLE_MULTI_MEMORY)

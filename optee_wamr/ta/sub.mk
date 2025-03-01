@@ -6,5 +6,5 @@ srcs-y += wasi.c wasm.c wamr_ta.c
 # Method 2 includes the static (trusted) library between the --start-group and
 # --end-group arguments.
 libnames += vmlib
-libdirs += ./build
-libdeps += ./build/libvmlib.a	
+libdirs += ./libs
+libdeps += ./libs/libvmlib.a	

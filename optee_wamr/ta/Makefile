@@ -7,7 +7,7 @@ CPPFLAGS += -O3 -DCFG_TEE_TA_LOG_LEVEL=$(CFG_TEE_TA_LOG_LEVEL) $(TA_DATA_SIZE_FL
 CFG_TA_OPTEE_CORE_API_COMPAT_1_1=y
 
 # The UUID for the Trusted Application
-BINARY=bc20728a-6a28-49d8-98d8-f22e7535f137
+BINARY=8987665f-ebe3-4258-a2b9-7b4d9aae8a09
 
 # TODO: TA_DEV_KIT_DIR needs to be specified
 -include $(TA_DEV_KIT_DIR)/mk/ta_dev_kit.mk

@@ -1,21 +1,74 @@
 /*
  * Copyright (C) 2019 Intel Corporation.  All rights reserved.
+ * SPDX-FileCopyrightText: 2024 Siemens AG (For Zephyr usermode changes)
  * SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
  */
 
 #include "platform_api_vmcore.h"
 #include "platform_api_extension.h"
 
+/* clang-format off */
 #define bh_assert(v) do {                                   \
     if (!(v)) {                                             \
         printf("\nASSERTION FAILED: %s, at %s, line %d\n",  \
                #v, __FILE__, __LINE__);                     \
         abort();                                            \
     }                                                       \
-  } while (0)
+} while (0)
+/* clang-format on */
+
+#if defined(CONFIG_ARM_MPU) || defined(CONFIG_ARC_MPU) \
+    || KERNEL_VERSION_NUMBER > 0x020300 /* version 2.3.0 */
+#define BH_ENABLE_ZEPHYR_MPU_STACK 1
+#elif !defined(BH_ENABLE_ZEPHYR_MPU_STACK)
+#define BH_ENABLE_ZEPHYR_MPU_STACK 0
+#endif
+#if !defined(BH_ZEPHYR_MPU_STACK_SIZE)
+#define BH_ZEPHYR_MPU_STACK_SIZE APP_THREAD_STACK_SIZE_MIN
+#endif
+#if !defined(BH_ZEPHYR_MPU_STACK_COUNT)
+#define BH_ZEPHYR_MPU_STACK_COUNT 4
+#endif
+
+#if BH_ENABLE_ZEPHYR_MPU_STACK != 0
+static K_THREAD_STACK_ARRAY_DEFINE(mpu_stacks, BH_ZEPHYR_MPU_STACK_COUNT,
+                                   BH_ZEPHYR_MPU_STACK_SIZE);
+static bool mpu_stack_allocated[BH_ZEPHYR_MPU_STACK_COUNT];
+static mutex_t mpu_stack_lock;
+
+static char *
+mpu_stack_alloc()
+{
+    int i;
+
+    mutex_lock(&mpu_stack_lock, K_FOREVER);
+    for (i = 0; i < BH_ZEPHYR_MPU_STACK_COUNT; i++) {
+        if (!mpu_stack_allocated[i]) {
+            mpu_stack_allocated[i] = true;
+            mutex_unlock(&mpu_stack_lock);
+            return (char *)mpu_stacks[i];
+        }
+    }
+    mutex_unlock(&mpu_stack_lock);
+    return NULL;
+}
+
+static void
+mpu_stack_free(char *stack)
+{
+    int i;
+
+    mutex_lock(&mpu_stack_lock, K_FOREVER);
+    for (i = 0; i < BH_ZEPHYR_MPU_STACK_COUNT; i++) {
+        if ((char *)mpu_stacks[i] == stack)
+            mpu_stack_allocated[i] = false;
+    }
+    mutex_unlock(&mpu_stack_lock);
+}
+#endif
 
 typedef struct os_thread_wait_node {
-    struct k_sem sem;
+    sem_t sem;
     os_thread_wait_list next;
 } os_thread_wait_node;
 
@@ -27,13 +80,17 @@ typedef struct os_thread_data {
     /* Jeff thread local root */
     void *tlr;
     /* Lock for waiting list */
-    struct k_mutex wait_list_lock;
+    mutex_t wait_list_lock;
     /* Waiting list of other threads who are joining this thread */
     os_thread_wait_list thread_wait_list;
     /* Thread stack size */
     unsigned stack_size;
+#if BH_ENABLE_ZEPHYR_MPU_STACK == 0
     /* Thread stack */
     char stack[1];
+#else
+    char *stack;
+#endif
 } os_thread_data;
 
 typedef struct os_thread_obj {
@@ -50,20 +107,21 @@ static bool is_thread_sys_inited = false;
 static os_thread_data supervisor_thread_data;
 
 /* Lock for thread data list */
-static struct k_mutex thread_data_lock;
+static mutex_t thread_data_lock;
 
 /* Thread data list */
 static os_thread_data *thread_data_list = NULL;
 
 /* Lock for thread object list */
-static struct k_mutex thread_obj_lock;
+static mutex_t thread_obj_lock;
 
 /* Thread object list */
 static os_thread_obj *thread_obj_list = NULL;
 
-static void thread_data_list_add(os_thread_data *thread_data)
+static void
+thread_data_list_add(os_thread_data *thread_data)
 {
-    k_mutex_lock(&thread_data_lock, K_FOREVER);
+    mutex_lock(&thread_data_lock, K_FOREVER);
     if (!thread_data_list)
         thread_data_list = thread_data;
     else {
@@ -71,7 +129,7 @@ static void thread_data_list_add(os_thread_data *thread_data)
         os_thread_data *p = thread_data_list;
         while (p) {
             if (p == thread_data) {
-                k_mutex_unlock(&thread_data_lock);
+                mutex_unlock(&thread_data_lock);
                 return;
             }
             p = p->next;
@@ -81,12 +139,13 @@ static void thread_data_list_add(os_thread_data *thread_data)
         thread_data->next = thread_data_list;
         thread_data_list = thread_data;
     }
-    k_mutex_unlock(&thread_data_lock);
+    mutex_unlock(&thread_data_lock);
 }
 
-static void thread_data_list_remove(os_thread_data *thread_data)
+static void
+thread_data_list_remove(os_thread_data *thread_data)
 {
-    k_mutex_lock(&thread_data_lock, K_FOREVER);
+    mutex_lock(&thread_data_lock, K_FOREVER);
     if (thread_data_list) {
         if (thread_data_list == thread_data)
             thread_data_list = thread_data_list->next;
@@ -99,31 +158,32 @@ static void thread_data_list_remove(os_thread_data *thread_data)
                 p->next = p->next->next;
         }
     }
-    k_mutex_unlock(&thread_data_lock);
+    mutex_unlock(&thread_data_lock);
 }
 
 static os_thread_data *
 thread_data_list_lookup(k_tid_t tid)
 {
-    k_mutex_lock(&thread_data_lock, K_FOREVER);
+    mutex_lock(&thread_data_lock, K_FOREVER);
     if (thread_data_list) {
         os_thread_data *p = thread_data_list;
         while (p) {
             if (p->tid == tid) {
                 /* Found */
-                k_mutex_unlock(&thread_data_lock);
+                mutex_unlock(&thread_data_lock);
                 return p;
             }
             p = p->next;
         }
     }
-    k_mutex_unlock(&thread_data_lock);
+    mutex_unlock(&thread_data_lock);
     return NULL;
 }
 
-static void thread_obj_list_add(os_thread_obj *thread_obj)
+static void
+thread_obj_list_add(os_thread_obj *thread_obj)
 {
-    k_mutex_lock(&thread_obj_lock, K_FOREVER);
+    mutex_lock(&thread_obj_lock, K_FOREVER);
     if (!thread_obj_list)
         thread_obj_list = thread_obj;
     else {
@@ -131,13 +191,14 @@ static void thread_obj_list_add(os_thread_obj *thread_obj)
         thread_obj->next = thread_obj_list;
         thread_obj_list = thread_obj;
     }
-    k_mutex_unlock(&thread_obj_lock);
+    mutex_unlock(&thread_obj_lock);
 }
 
-static void thread_obj_list_reclaim()
+static void
+thread_obj_list_reclaim()
 {
     os_thread_obj *p, *p_prev;
-    k_mutex_lock(&thread_obj_lock, K_FOREVER);
+    mutex_lock(&thread_obj_lock, K_FOREVER);
     p_prev = NULL;
     p = thread_obj_list;
     while (p) {
@@ -146,26 +207,32 @@ static void thread_obj_list_reclaim()
                 thread_obj_list = p->next;
                 BH_FREE(p);
                 p = thread_obj_list;
-            } else { /* p is not the head of list */
+            }
+            else { /* p is not the head of list */
                 p_prev->next = p->next;
                 BH_FREE(p);
                 p = p_prev->next;
             }
-        } else {
+        }
+        else {
             p_prev = p;
             p = p->next;
         }
     }
-    k_mutex_unlock(&thread_obj_lock);
+    mutex_unlock(&thread_obj_lock);
 }
 
-int os_thread_sys_init()
+int
+os_thread_sys_init()
 {
     if (is_thread_sys_inited)
         return BHT_OK;
 
-    k_mutex_init(&thread_data_lock);
-    k_mutex_init(&thread_obj_lock);
+#if BH_ENABLE_ZEPHYR_MPU_STACK != 0
+    mutex_init(&mpu_stack_lock);
+#endif
+    mutex_init(&thread_data_lock);
+    mutex_init(&thread_obj_lock);
 
     /* Initialize supervisor thread data */
     memset(&supervisor_thread_data, 0, sizeof(supervisor_thread_data));
@@ -177,7 +244,8 @@ int os_thread_sys_init()
     return BHT_OK;
 }
 
-void os_thread_sys_destroy(void)
+void
+os_thread_sys_destroy(void)
 {
     if (is_thread_sys_inited) {
         is_thread_sys_inited = false;
@@ -191,51 +259,58 @@ thread_data_current()
     return thread_data_list_lookup(tid);
 }
 
-static void os_thread_cleanup(void)
+static void
+os_thread_cleanup(void)
 {
     os_thread_data *thread_data = thread_data_current();
 
     bh_assert(thread_data != NULL);
-    k_mutex_lock(&thread_data->wait_list_lock, K_FOREVER);
+    mutex_lock(&thread_data->wait_list_lock, K_FOREVER);
     if (thread_data->thread_wait_list) {
         /* Signal each joining thread */
         os_thread_wait_list head = thread_data->thread_wait_list;
         while (head) {
             os_thread_wait_list next = head->next;
-            k_sem_give(&head->sem);
+            sem_give(&head->sem);
             /* head will be freed by joining thread */
             head = next;
         }
         thread_data->thread_wait_list = NULL;
     }
-    k_mutex_unlock(&thread_data->wait_list_lock);
+    mutex_unlock(&thread_data->wait_list_lock);
 
     thread_data_list_remove(thread_data);
     /* Set flag to true for the next thread creating to
      free the thread object */
-    ((os_thread_obj*) thread_data->tid)->to_be_freed = true;
+    ((os_thread_obj *)thread_data->tid)->to_be_freed = true;
+#if BH_ENABLE_ZEPHYR_MPU_STACK != 0
+    mpu_stack_free(thread_data->stack);
+#endif
     BH_FREE(thread_data);
 }
 
-static void os_thread_wrapper(void *start, void *arg, void *thread_data)
+static void
+os_thread_wrapper(void *start, void *arg, void *thread_data)
 {
     /* Set thread custom data */
-    ((os_thread_data*) thread_data)->tid = k_current_get();
+    ((os_thread_data *)thread_data)->tid = k_current_get();
     thread_data_list_add(thread_data);
 
-    ((thread_start_routine_t) start)(arg);
+    ((thread_start_routine_t)start)(arg);
     os_thread_cleanup();
 }
 
-int os_thread_create(korp_tid *p_tid, thread_start_routine_t start, void *arg,
-                     unsigned int stack_size)
+int
+os_thread_create(korp_tid *p_tid, thread_start_routine_t start, void *arg,
+                 unsigned int stack_size)
 {
     return os_thread_create_with_prio(p_tid, start, arg, stack_size,
                                       BH_THREAD_DEFAULT_PRIORITY);
 }
 
-int os_thread_create_with_prio(korp_tid *p_tid, thread_start_routine_t start,
-                               void *arg, unsigned int stack_size, int prio)
+int
+os_thread_create_with_prio(korp_tid *p_tid, thread_start_routine_t start,
+                           void *arg, unsigned int stack_size, int prio)
 {
     korp_tid tid;
     os_thread_data *thread_data;
@@ -253,62 +328,89 @@ int os_thread_create_with_prio(korp_tid *p_tid, thread_start_routine_t start,
 
     memset(tid, 0, sizeof(os_thread_obj));
 
+    /* Create and initialize thread data */
+#if BH_ENABLE_ZEPHYR_MPU_STACK == 0
     if (stack_size < APP_THREAD_STACK_SIZE_MIN)
         stack_size = APP_THREAD_STACK_SIZE_MIN;
-
-    /* Create and initialize thread data */
     thread_data_size = offsetof(os_thread_data, stack) + stack_size;
+#else
+    stack_size = BH_ZEPHYR_MPU_STACK_SIZE;
+    thread_data_size = sizeof(os_thread_data);
+#endif
     if (!(thread_data = BH_MALLOC(thread_data_size))) {
-        BH_FREE(tid);
-        return BHT_ERROR;
+        goto fail1;
     }
 
     memset(thread_data, 0, thread_data_size);
-    k_mutex_init(&thread_data->wait_list_lock);
+    mutex_init(&thread_data->wait_list_lock);
     thread_data->stack_size = stack_size;
     thread_data->tid = tid;
+
+#if BH_ENABLE_ZEPHYR_MPU_STACK != 0
+    if (!(thread_data->stack = mpu_stack_alloc())) {
+        goto fail2;
+    }
+#endif
 
     /* Create the thread */
     if (!((tid = k_thread_create(tid, (k_thread_stack_t *)thread_data->stack,
                                  stack_size, os_thread_wrapper, start, arg,
                                  thread_data, prio, 0, K_NO_WAIT)))) {
-        BH_FREE(tid);
-        BH_FREE(thread_data);
-        return BHT_ERROR;
+        goto fail3;
     }
 
     bh_assert(tid == thread_data->tid);
 
+    k_thread_name_set(tid, "wasm-zephyr");
+
     /* Set thread custom data */
     thread_data_list_add(thread_data);
-    thread_obj_list_add((os_thread_obj*) tid);
+    thread_obj_list_add((os_thread_obj *)tid);
     *p_tid = tid;
     return BHT_OK;
+
+fail3:
+#if BH_ENABLE_ZEPHYR_MPU_STACK != 0
+    mpu_stack_free(thread_data->stack);
+fail2:
+#endif
+    BH_FREE(thread_data);
+fail1:
+    BH_FREE(tid);
+    return BHT_ERROR;
 }
 
-korp_tid os_self_thread()
+korp_tid
+os_self_thread()
 {
     return (korp_tid)k_current_get();
 }
 
-int os_thread_join(korp_tid thread, void **value_ptr)
+int
+os_thread_join(korp_tid thread, void **value_ptr)
 {
-    (void) value_ptr;
+    (void)value_ptr;
     os_thread_data *thread_data;
     os_thread_wait_node *node;
+
+    /* Get thread data */
+    thread_data = thread_data_list_lookup(thread);
+
+    if (thread_data == NULL) {
+        os_printf(
+            "Can't join thread %p, probably already exited or does not exist",
+            thread);
+        return BHT_OK;
+    }
 
     /* Create wait node and append it to wait list */
     if (!(node = BH_MALLOC(sizeof(os_thread_wait_node))))
         return BHT_ERROR;
 
-    k_sem_init(&node->sem, 0, 1);
+    sem_init(&node->sem, 0, 1);
     node->next = NULL;
 
-    /* Get thread data */
-    thread_data = thread_data_list_lookup(thread);
-    bh_assert(thread_data != NULL);
-
-    k_mutex_lock(&thread_data->wait_list_lock, K_FOREVER);
+    mutex_lock(&thread_data->wait_list_lock, K_FOREVER);
     if (!thread_data->thread_wait_list)
         thread_data->thread_wait_list = node;
     else {
@@ -318,10 +420,10 @@ int os_thread_join(korp_tid thread, void **value_ptr)
             p = p->next;
         p->next = node;
     }
-    k_mutex_unlock(&thread_data->wait_list_lock);
+    mutex_unlock(&thread_data->wait_list_lock);
 
     /* Wait the sem */
-    k_sem_take(&node->sem, K_FOREVER);
+    sem_take(&node->sem, K_FOREVER);
 
     /* Wait some time for the thread to be actually terminated */
     k_sleep(Z_TIMEOUT_MS(100));
@@ -331,54 +433,61 @@ int os_thread_join(korp_tid thread, void **value_ptr)
     return BHT_OK;
 }
 
-int os_mutex_init(korp_mutex *mutex)
+int
+os_mutex_init(korp_mutex *mutex)
 {
-    k_mutex_init(mutex);
+    mutex_init(mutex);
     return BHT_OK;
 }
 
-int os_recursive_mutex_init(korp_mutex *mutex)
+int
+os_recursive_mutex_init(korp_mutex *mutex)
 {
-    k_mutex_init(mutex);
+    mutex_init(mutex);
     return BHT_OK;
 }
 
-int os_mutex_destroy(korp_mutex *mutex)
+int
+os_mutex_destroy(korp_mutex *mutex)
 {
-    (void) mutex;
+    (void)mutex;
     return BHT_OK;
 }
 
-int os_mutex_lock(korp_mutex *mutex)
+int
+os_mutex_lock(korp_mutex *mutex)
 {
-    return k_mutex_lock(mutex, K_FOREVER);
+    return mutex_lock(mutex, K_FOREVER);
 }
 
-int os_mutex_unlock(korp_mutex *mutex)
+int
+os_mutex_unlock(korp_mutex *mutex)
 {
 #if KERNEL_VERSION_NUMBER >= 0x020200 /* version 2.2.0 */
-    return k_mutex_unlock(mutex);
+    return mutex_unlock(mutex);
 #else
-    k_mutex_unlock(mutex);
+    mutex_unlock(mutex);
     return 0;
 #endif
 }
 
-int os_cond_init(korp_cond *cond)
+int
+os_cond_init(korp_cond *cond)
 {
-    k_mutex_init(&cond->wait_list_lock);
+    mutex_init(&cond->wait_list_lock);
     cond->thread_wait_list = NULL;
     return BHT_OK;
 }
 
-int os_cond_destroy(korp_cond *cond)
+int
+os_cond_destroy(korp_cond *cond)
 {
-    (void) cond;
+    (void)cond;
     return BHT_OK;
 }
 
-static int os_cond_wait_internal(korp_cond *cond, korp_mutex *mutex,
-                                 bool timed, int mills)
+static int
+os_cond_wait_internal(korp_cond *cond, korp_mutex *mutex, bool timed, int mills)
 {
     os_thread_wait_node *node;
 
@@ -386,10 +495,10 @@ static int os_cond_wait_internal(korp_cond *cond, korp_mutex *mutex,
     if (!(node = BH_MALLOC(sizeof(os_thread_wait_node))))
         return BHT_ERROR;
 
-    k_sem_init(&node->sem, 0, 1);
+    sem_init(&node->sem, 0, 1);
     node->next = NULL;
 
-    k_mutex_lock(&cond->wait_list_lock, K_FOREVER);
+    mutex_lock(&cond->wait_list_lock, K_FOREVER);
     if (!cond->thread_wait_list)
         cond->thread_wait_list = node;
     else {
@@ -399,15 +508,15 @@ static int os_cond_wait_internal(korp_cond *cond, korp_mutex *mutex,
             p = p->next;
         p->next = node;
     }
-    k_mutex_unlock(&cond->wait_list_lock);
+    mutex_unlock(&cond->wait_list_lock);
 
     /* Unlock mutex, wait sem and lock mutex again */
-    k_mutex_unlock(mutex);
-    k_sem_take(&node->sem, timed ? Z_TIMEOUT_MS(mills) : K_FOREVER);
-    k_mutex_lock(mutex, K_FOREVER);
+    mutex_unlock(mutex);
+    sem_take(&node->sem, timed ? Z_TIMEOUT_MS(mills) : K_FOREVER);
+    mutex_lock(mutex, K_FOREVER);
 
     /* Remove wait node from wait list */
-    k_mutex_lock(&cond->wait_list_lock, K_FOREVER);
+    mutex_lock(&cond->wait_list_lock, K_FOREVER);
     if (cond->thread_wait_list == node)
         cond->thread_wait_list = node->next;
     else {
@@ -418,17 +527,19 @@ static int os_cond_wait_internal(korp_cond *cond, korp_mutex *mutex,
         p->next = node->next;
     }
     BH_FREE(node);
-    k_mutex_unlock(&cond->wait_list_lock);
+    mutex_unlock(&cond->wait_list_lock);
 
     return BHT_OK;
 }
 
-int os_cond_wait(korp_cond *cond, korp_mutex *mutex)
+int
+os_cond_wait(korp_cond *cond, korp_mutex *mutex)
 {
     return os_cond_wait_internal(cond, mutex, false, 0);
 }
 
-int os_cond_reltimedwait(korp_cond *cond, korp_mutex *mutex, uint64 useconds)
+int
+os_cond_reltimedwait(korp_cond *cond, korp_mutex *mutex, uint64 useconds)
 {
 
     if (useconds == BHT_WAIT_FOREVER) {
@@ -450,24 +561,59 @@ int os_cond_reltimedwait(korp_cond *cond, korp_mutex *mutex, uint64 useconds)
     }
 }
 
-int os_cond_signal(korp_cond *cond)
+int
+os_cond_signal(korp_cond *cond)
 {
     /* Signal the head wait node of wait list */
-    k_mutex_lock(&cond->wait_list_lock, K_FOREVER);
+    mutex_lock(&cond->wait_list_lock, K_FOREVER);
     if (cond->thread_wait_list)
-        k_sem_give(&cond->thread_wait_list->sem);
-    k_mutex_unlock(&cond->wait_list_lock);
+        sem_give(&cond->thread_wait_list->sem);
+    mutex_unlock(&cond->wait_list_lock);
 
     return BHT_OK;
 }
 
-uint8 *os_thread_get_stack_boundary()
+uint8 *
+os_thread_get_stack_boundary()
 {
-#if defined(CONFIG_THREAD_STACK_INFO)
+#if defined(CONFIG_THREAD_STACK_INFO) && !defined(CONFIG_USERSPACE)
     korp_tid thread = k_current_get();
-    return (uint8*)thread->stack_info.start;
+    return (uint8 *)thread->stack_info.start;
 #else
     return NULL;
 #endif
 }
 
+void
+os_thread_jit_write_protect_np(bool enabled)
+{}
+
+int
+os_thread_detach(korp_tid thread)
+{
+    (void)thread;
+    return BHT_OK;
+}
+
+void
+os_thread_exit(void *retval)
+{
+    (void)retval;
+    os_thread_cleanup();
+    k_thread_abort(k_current_get());
+}
+
+int
+os_cond_broadcast(korp_cond *cond)
+{
+    os_thread_wait_node *node;
+    mutex_lock(&cond->wait_list_lock, K_FOREVER);
+    node = cond->thread_wait_list;
+    while (node) {
+        os_thread_wait_node *next = node->next;
+        sem_give(&node->sem);
+        node = next;
+    }
+    mutex_unlock(&cond->wait_list_lock);
+    return BHT_OK;
+}

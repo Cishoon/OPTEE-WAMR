@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2019 Intel Corporation.  All rights reserved.
+ * SPDX-FileCopyrightText: 2024 Siemens AG (For Zephyr usermode changes)
  * SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
  */
 
@@ -25,21 +26,24 @@ disable_mpu_rasr_xn(void)
        would most likely be set at index 2. */
     for (index = 0U; index < 8; index++) {
         MPU->RNR = index;
+#ifdef MPU_RASR_XN_Msk
         if (MPU->RASR & MPU_RASR_XN_Msk) {
             MPU->RASR |= ~MPU_RASR_XN_Msk;
         }
+#endif
     }
-
 }
-#endif  /* end of CONFIG_ARM_MPU */
+#endif /* end of CONFIG_ARM_MPU */
 #endif
 
+#ifndef CONFIG_USERSPACE
 static int
 _stdout_hook_iwasm(int c)
 {
     printk("%c", (char)c);
     return 1;
 }
+#endif
 
 int
 os_thread_sys_init();
@@ -50,9 +54,11 @@ os_thread_sys_destroy();
 int
 bh_platform_init()
 {
+#ifndef CONFIG_USERSPACE
     extern void __stdout_hook_install(int (*hook)(int));
     /* Enable printf() in Zephyr */
     __stdout_hook_install(_stdout_hook_iwasm);
+#endif
 
 #if WASM_ENABLE_AOT != 0
 #ifdef CONFIG_ARM_MPU
@@ -73,18 +79,25 @@ bh_platform_destroy()
 void *
 os_malloc(unsigned size)
 {
-    return NULL;
+    return malloc(size);
 }
 
 void *
 os_realloc(void *ptr, unsigned size)
 {
-    return NULL;
+    return realloc(ptr, size);
 }
 
 void
 os_free(void *ptr)
 {
+    free(ptr);
+}
+
+int
+os_dumps_proc_mem_info(char *out, unsigned int size)
+{
+    return -1;
 }
 
 #if 0
@@ -169,14 +182,27 @@ strcspn(const char *s, const char *reject)
 #endif
 
 void *
-os_mmap(void *hint, size_t size, int prot, int flags)
+os_mmap(void *hint, size_t size, int prot, int flags, os_file_handle file)
 {
+    void *addr;
+
     if ((uint64)size >= UINT32_MAX)
         return NULL;
+
     if (exec_mem_alloc_func)
-        return exec_mem_alloc_func((uint32)size);
+        addr = exec_mem_alloc_func((uint32)size);
     else
-        return BH_MALLOC(size);
+        addr = BH_MALLOC(size);
+
+    if (addr)
+        memset(addr, 0, size);
+    return addr;
+}
+
+void *
+os_mremap(void *old_addr, size_t old_size, size_t new_size)
+{
+    return os_mremap_slow(old_addr, old_size, new_size);
 }
 
 void
@@ -198,17 +224,34 @@ void
 os_dcache_flush()
 {
 #if defined(CONFIG_CPU_CORTEX_M7) && defined(CONFIG_ARM_MPU)
+#if KERNEL_VERSION_NUMBER < 0x030300 /* version 3.3.0 */
     uint32 key;
     key = irq_lock();
     SCB_CleanDCache();
     irq_unlock(key);
+#else
+    sys_cache_data_flush_all();
+#endif
+#elif defined(CONFIG_SOC_CVF_EM7D) && defined(CONFIG_ARC_MPU) \
+    && defined(CONFIG_CACHE_FLUSHING)
+    __asm__ __volatile__("sync");
+    z_arc_v2_aux_reg_write(_ARC_V2_DC_FLSH, BIT(0));
+    __asm__ __volatile__("sync");
 #endif
 }
 
-void set_exec_mem_alloc_func(exec_mem_alloc_func_t alloc_func,
-                             exec_mem_free_func_t free_func)
+void
+os_icache_flush(void *start, size_t len)
+{
+#if KERNEL_VERSION_NUMBER >= 0x030300 /* version 3.3.0 */
+    sys_cache_instr_flush_range(start, len);
+#endif
+}
+
+void
+set_exec_mem_alloc_func(exec_mem_alloc_func_t alloc_func,
+                        exec_mem_free_func_t free_func)
 {
     exec_mem_alloc_func = alloc_func;
     exec_mem_free_func = free_func;
 }
-

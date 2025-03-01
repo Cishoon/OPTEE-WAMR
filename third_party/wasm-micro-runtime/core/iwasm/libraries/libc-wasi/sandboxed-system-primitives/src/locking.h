@@ -142,7 +142,7 @@ cond_init_monotonic(struct cond *cond)
     if (pthread_condattr_setclock(&attr, CLOCK_MONOTONIC) != 0)
         goto fail;
 
-    if (pthread_cond_init(&cond->object, &attr) != 0)
+    if (pthread_cond_init((pthread_cond_t *)&cond->object, &attr) != 0)
         goto fail;
 
     ret = true;

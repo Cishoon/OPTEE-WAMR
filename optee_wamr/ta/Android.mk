@@ -1,4 +1,4 @@
 LOCAL_PATH := $(call my-dir)
 
-local_module := bc20728a-6a28-49d8-98d8-f22e7535f137
+local_module := 8987665f-ebe3-4258-a2b9-7b4d9aae8a09
 include $(BUILD_OPTEE_MK)
